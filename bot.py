@@ -1,6 +1,6 @@
 import logging
 
-import requests
+import httpx
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
@@ -26,7 +26,8 @@ async def start_bot():
     async def start(event):
         raw_text = event.raw_text
         token = None
-
+        logging.info(f'raw_text: {raw_text}')
+        
         # Extract token from the /start command
         if ' ' in raw_text:
             token = raw_text.split(' ', 1)[1].strip()
@@ -42,11 +43,15 @@ async def start_bot():
 
         try:
             session_string = client.session.save()
-            response = requests.post(f'http://localhost:5000/callback/{token}', data={'session': session_string})
-            if response.status_code == 200:
-                await event.reply("You have been authenticated! You can now use the desktop app.")
-            else:
-                await event.reply("Authorization failed, please try again.")
+            async with httpx.AsyncClient() as cl:
+                response = await cl.post(
+                    f'http://localhost:5000/callback/{token}',
+                    data={'session': session_string}
+                )
+                if response.status_code == 200:
+                    await event.reply("You have been authenticated! You can now use the desktop app.")
+                else:
+                    await event.reply("Authorization failed, please try again.")
         except Exception as e:
             await event.reply(f"An error occurred: {str(e)}")
             logging.error("An error occurred: %s", str(e))
