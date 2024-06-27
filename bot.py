@@ -1,7 +1,12 @@
+import logging
+
 import requests
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
+
 from config import API_HASH, API_ID, BOT_TOKEN
+
+logging.basicConfig(level=logging.DEBUG)
 
 api_id = API_ID
 api_hash = API_HASH
@@ -28,7 +33,7 @@ async def start_bot():
         elif '\n' in raw_text:
             token = raw_text.split('\n', 1)[1].strip()
 
-        print('token received:', token)
+        logging.info(f'token received: {token}')
 
         # Verify that the token is present and not empty
         if not token:
@@ -36,7 +41,6 @@ async def start_bot():
             return
 
         try:
-            # Use the session client to handle the authorization
             session_string = client.session.save()
             response = requests.post(f'http://localhost:5000/callback/{token}', data={'session': session_string})
             if response.status_code == 200:
@@ -45,11 +49,9 @@ async def start_bot():
                 await event.reply("Authorization failed, please try again.")
         except Exception as e:
             await event.reply(f"An error occurred: {str(e)}")
+            logging.error("An error occurred: %s", str(e))
 
-    # Run the bot until disconnected
     await bot.run_until_disconnected()
-
-    # Disconnect the session client
     await client.disconnect()
 
 
