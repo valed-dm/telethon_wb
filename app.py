@@ -1,14 +1,13 @@
 import asyncio
 import logging
 import uuid
-
 import aiofiles
 import qrcode
 from hypercorn import Config
 from hypercorn.asyncio import serve
-from quart import Quart, render_template_string, request, url_for
+from quart import Quart, render_template_string, request
 
-from config import BOT_NAME
+from config import BOT_NAME, NGROK_URL
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -18,6 +17,7 @@ app = Quart(__name__, static_url_path='/static', static_folder='static')
 tokens = {}
 
 bot_name = BOT_NAME
+ngrok_url = NGROK_URL
 
 
 @app.route('/')
@@ -26,24 +26,28 @@ async def index():
 
     logging.info(f'token generated: {token}')
 
-    # Save the token with an initial empty session string
+    deep_link = f"https://t.me/{bot_name}?start={token}"
+    fallback_url = f"{ngrok_url}/authorize/{token}"
+
+    # Generate separate QR codes
+    qr_code_deep_link = qrcode.make(deep_link)
+    qr_code_fallback_url = qrcode.make(fallback_url)
+
+    # Save the QR codes as images
+    qr_code_deep_link.save(f'static/{token}_telegram.png')
+    qr_code_fallback_url.save(f'static/{token}_fallback.png')
+
+    # Store the token
     tokens[token] = None
 
-    deep_link = f"https://t.me/{bot_name}?start={token}"
-    fallback_url = url_for('authorize', token=token, _external=True)
-    qr_code_url = f"{deep_link}\n{fallback_url}"
-    qr_code = qrcode.make(qr_code_url)
-    qr_code_path = f'static/{token}.png'
-    qr_code.save(qr_code_path)
-
     return await render_template_string('''
-        <h1>Authenticate with Telegram</h1>
-        <p>You can either scan the QR code with your mobile device or click the button below to authorize using the desktop application.</p>
-        <img src="/static/{{ token }}.png" alt="QR Code">
-        <br><br>
-        <a href="{{ fallback_url }}">
-            <button>Authorize with Desktop App</button>
-        </a>
+        <h1>Authenticate with your mobile device</h1>
+        <p>Scan this QR code to open the Telegram bot:</p>
+        <img src="/static/{{ token }}_telegram.png">
+        <p>Or click the button below to authorize with the desktop app:</p>
+        <a href="{{ fallback_url }}"><button>Authorize with Desktop App</button></a>
+        <p>If you prefer, you can also scan this QR code to authorize with the desktop app:</p>
+        <img src="/static/{{ token }}_fallback.png">
     ''', token=token, fallback_url=fallback_url)
 
 
@@ -53,13 +57,11 @@ async def authorize(token):
 
     if token not in tokens:
         return "Invalid or expired token", 400
-    # Display a button to start the Telegram bot authorization
+
     return await render_template_string('''
         <h1>Authorize the Desktop App</h1>
         <p>Click the button below to authorize the app using Telegram.</p>
-        <a href="https://t.me/{{ bot_name }}?start={{ token }}">
-            <button>Authorize with Telegram</button>
-        </a>
+        <a href="https://t.me/{{ bot_name }}?start={{ token }}">Authorize with Telegram</a>
     ''', bot_name=bot_name, token=token)
 
 
