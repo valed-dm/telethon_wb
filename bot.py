@@ -1,7 +1,7 @@
 import logging
-
 import httpx
 from telethon import TelegramClient, events
+from telethon.errors import UserIsBlockedError
 from telethon.sessions import StringSession
 
 from config import API_HASH, API_ID, BOT_TOKEN
@@ -27,7 +27,7 @@ async def start_bot():
         raw_text = event.raw_text
         token = None
         logging.info(f'raw_text: {raw_text}')
-        
+
         # Extract token from the /start command
         if ' ' in raw_text:
             token = raw_text.split(' ', 1)[1].strip()
@@ -52,9 +52,14 @@ async def start_bot():
                     await event.reply("You have been authenticated! You can now use the desktop app.")
                 else:
                     await event.reply("Authorization failed, please try again.")
+        except UserIsBlockedError:
+            logging.error(f"User has blocked the bot: {event.chat_id}")
         except Exception as e:
-            await event.reply(f"An error occurred: {str(e)}")
-            logging.error("An error occurred: %s", str(e))
+            logging.error(f"An error occurred: {e}")
+            try:
+                await event.reply(f"An error occurred: {str(e)}")
+            except UserIsBlockedError:
+                logging.error(f"User has blocked the bot: {event.chat_id}")
 
     await bot.run_until_disconnected()
     await client.disconnect()
