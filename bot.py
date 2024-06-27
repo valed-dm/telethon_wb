@@ -36,8 +36,11 @@ async def start_bot():
 
         logging.info(f'token received: {token}')
 
-        # Verify that the token is present and not empty
+        # Ignore if the start command doesn't contain a token
         if not token:
+            if raw_text == '/start':
+                logging.info("Received a plain /start command without token, ignoring.")
+                return
             await event.reply("Invalid start command. No token found.")
             return
 
