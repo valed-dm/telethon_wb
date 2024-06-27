@@ -6,7 +6,7 @@ import aiofiles
 import qrcode
 from hypercorn import Config
 from hypercorn.asyncio import serve
-from quart import Quart, render_template_string, request
+from quart import Quart, render_template_string, request, url_for
 
 from config import BOT_NAME
 
@@ -26,13 +26,25 @@ async def index():
 
     logging.info(f'token generated: {token}')
 
+    # Save the token with an initial empty session string
+    tokens[token] = None
+
     deep_link = f"https://t.me/{bot_name}?start={token}"
-    qr_code = qrcode.make(deep_link)
-    qr_code.save(f'static/{token}.png')
+    fallback_url = url_for('authorize', token=token, _external=True)
+    qr_code_url = f"{deep_link}\n{fallback_url}"
+    qr_code = qrcode.make(qr_code_url)
+    qr_code_path = f'static/{token}.png'
+    qr_code.save(qr_code_path)
+
     return await render_template_string('''
-        <h1>Scan this QR code with your mobile device</h1>
-        <img src="/static/{{ token }}.png">
-    ''', token=token)
+        <h1>Authenticate with Telegram</h1>
+        <p>You can either scan the QR code with your mobile device or click the button below to authorize using the desktop application.</p>
+        <img src="/static/{{ token }}.png" alt="QR Code">
+        <br><br>
+        <a href="{{ fallback_url }}">
+            <button>Authorize with Desktop App</button>
+        </a>
+    ''', token=token, fallback_url=fallback_url)
 
 
 @app.route('/authorize/<token>')
@@ -45,7 +57,9 @@ async def authorize(token):
     return await render_template_string('''
         <h1>Authorize the Desktop App</h1>
         <p>Click the button below to authorize the app using Telegram.</p>
-        <a href="https://t.me/{{ bot_name }}?start={{ token }}">Authorize with Telegram</a>
+        <a href="https://t.me/{{ bot_name }}?start={{ token }}">
+            <button>Authorize with Telegram</button>
+        </a>
     ''', bot_name=bot_name, token=token)
 
 
