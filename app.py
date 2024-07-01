@@ -72,9 +72,19 @@ async def authorize(token):
 async def callback(token):
     form = await request.form
     session_string = form.get('session')
+    first_name = form.get('first_name')
+    last_name = form.get('last_name')
+    username = form.get('username')
+    
     if not session_string:
         return "Authorization failed", 400
-    tokens[token] = session_string
+    
+    tokens[token] = {
+        'session': session_string,
+        'first_name': first_name,
+        'last_name': last_name,
+        'username': username
+    }
 
     # Automatically save the session string to a file
     async with aiofiles.open('session_data.txt', 'w') as f:
@@ -96,11 +106,16 @@ async def main():
     if token not in tokens or not tokens[token]:
         return "Unauthorized", 403
 
+    user_info = tokens[token]
+    first_name = user_info['first_name']
+    last_name = user_info['last_name']
+    username = user_info['username']
+
     # Load any additional data for the user here
     return await render_template_string('''
-        <h1>Welcome, authorized user!</h1>
-        <p>You are now authenticated.</p>
-    ''')
+           <h1>Welcome, {{ first_name }} {{ last_name }}!</h1>
+           <p>You are now authenticated, {{ username }}</p>
+       ''', first_name=first_name, last_name=last_name, username=username)
 
 
 async def main_app():
