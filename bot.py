@@ -25,6 +25,12 @@ async def start_bot():
 
     @bot.on(events.NewMessage(pattern='/start'))
     async def start(event):
+        sender = await event.get_sender()
+        sender_info = {
+            'first_name': sender.first_name,
+            'last_name': sender.last_name,
+            'username': sender.username
+        }
         raw_text = event.raw_text
         token = None
 
@@ -47,7 +53,7 @@ async def start_bot():
             async with httpx.AsyncClient() as cl:
                 response = await cl.post(
                     f'http://localhost:5000/callback/{token}',
-                    data={'session': session_string}
+                    data={'session': session_string, **sender_info}
                 )
                 if response.status_code == 200:
                     await event.reply("You have been authenticated! You can now use the desktop app.")
