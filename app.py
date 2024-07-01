@@ -1,6 +1,9 @@
 import asyncio
 import logging
 import uuid
+import webbrowser
+from concurrent.futures import ThreadPoolExecutor
+
 import aiofiles
 import qrcode
 from hypercorn import Config
@@ -9,9 +12,11 @@ from quart import Quart, render_template_string, request
 
 from config import BOT_NAME, NGROK_URL
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 app = Quart(__name__, static_url_path='/static', static_folder='static')
+
+executor = ThreadPoolExecutor()
 
 # Store tokens and session strings
 tokens = {}
@@ -23,8 +28,6 @@ ngrok_url = NGROK_URL
 @app.route('/')
 async def index():
     token = str(uuid.uuid4())
-
-    logging.info(f'token generated: {token}')
 
     deep_link = f"https://t.me/{bot_name}?start={token}"
     fallback_url = f"{ngrok_url}/authorize/{token}"
@@ -53,22 +56,20 @@ async def index():
 
 @app.route('/authorize/<token>')
 async def authorize(token):
-    logging.info(f'token for authorization: {token}')
-
     if token not in tokens:
         return "Invalid or expired token", 400
 
     return await render_template_string('''
         <h1>Authorize the Desktop App</h1>
         <p>Click the button below to authorize the app using Telegram.</p>
-        <a href="https://t.me/{{ bot_name }}?start={{ token }}">Authorize with Telegram</a>
+        <a href="https://t.me/{{ bot_name }}?start={{ token }}" id="telegramLink">
+            Authorize with Telegram
+        </a>
     ''', bot_name=bot_name, token=token)
 
 
 @app.route('/callback/<token>', methods=['POST'])
 async def callback(token):
-    logging.info(f'token for callback: {token}')
-
     form = await request.form
     session_string = form.get('session')
     if not session_string:
@@ -79,10 +80,30 @@ async def callback(token):
     async with aiofiles.open('session_data.txt', 'w') as f:
         await f.write(session_string)
 
-    return "Authorization successful, you can close this page"
+    # Automatically open main app page
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        executor, 
+        webbrowser.open_new, f'http://localhost:5000/main?token={token}'
+    )
+
+    return "Authorization successful"
 
 
+@app.route('/main')
 async def main():
+    token = request.args.get('token')
+    if token not in tokens or not tokens[token]:
+        return "Unauthorized", 403
+
+    # Load any additional data for the user here
+    return await render_template_string('''
+        <h1>Welcome, authorized user!</h1>
+        <p>You are now authenticated.</p>
+    ''')
+
+
+async def main_app():
     config = Config()
     config.bind = ["0.0.0.0:5000"]
     logging.info("Starting Quart server")
@@ -90,4 +111,4 @@ async def main():
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    asyncio.run(main_app())
