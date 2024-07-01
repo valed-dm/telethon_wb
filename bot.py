@@ -1,4 +1,5 @@
 import logging
+
 import httpx
 from telethon import TelegramClient, events
 from telethon.errors import UserIsBlockedError
@@ -26,15 +27,12 @@ async def start_bot():
     async def start(event):
         raw_text = event.raw_text
         token = None
-        logging.info(f'raw_text: {raw_text}')
 
         # Extract token from the /start command
         if ' ' in raw_text:
             token = raw_text.split(' ', 1)[1].strip()
         elif '\n' in raw_text:
             token = raw_text.split('\n', 1)[1].strip()
-
-        logging.info(f'token received: {token}')
 
         # Ignore if the start command doesn't contain a token
         if not token:
