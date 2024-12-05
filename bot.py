@@ -1,7 +1,13 @@
-import requests
+import logging
+
+import httpx
 from telethon import TelegramClient, events
+from telethon.errors import UserIsBlockedError
 from telethon.sessions import StringSession
+
 from config import API_HASH, API_ID, BOT_TOKEN
+
+logging.basicConfig(level=logging.DEBUG)
 
 api_id = API_ID
 api_hash = API_HASH
@@ -19,6 +25,12 @@ async def start_bot():
 
     @bot.on(events.NewMessage(pattern='/start'))
     async def start(event):
+        sender = await event.get_sender()
+        sender_info = {
+            'first_name': sender.first_name,
+            'last_name': sender.last_name,
+            'username': sender.username
+        }
         raw_text = event.raw_text
         token = None
 
@@ -28,28 +40,35 @@ async def start_bot():
         elif '\n' in raw_text:
             token = raw_text.split('\n', 1)[1].strip()
 
-        print('token received:', token)
-
-        # Verify that the token is present and not empty
+        # Ignore if the start command doesn't contain a token
         if not token:
+            if raw_text == '/start':
+                logging.info("Received a plain /start command without token, ignoring.")
+                return
             await event.reply("Invalid start command. No token found.")
             return
 
         try:
-            # Use the session client to handle the authorization
             session_string = client.session.save()
-            response = requests.post(f'http://localhost:5000/callback/{token}', data={'session': session_string})
-            if response.status_code == 200:
-                await event.reply("You have been authenticated! You can now use the desktop app.")
-            else:
-                await event.reply("Authorization failed, please try again.")
+            async with httpx.AsyncClient() as cl:
+                response = await cl.post(
+                    f'http://localhost:5000/callback/{token}',
+                    data={'session': session_string, **sender_info}
+                )
+                if response.status_code == 200:
+                    await event.reply("You have been authenticated! You can now use the desktop app.")
+                else:
+                    await event.reply("Authorization failed, please try again.")
+        except UserIsBlockedError:
+            logging.error(f"User has blocked the bot: {event.chat_id}")
         except Exception as e:
-            await event.reply(f"An error occurred: {str(e)}")
+            logging.error(f"An error occurred: {e}")
+            try:
+                await event.reply(f"An error occurred: {str(e)}")
+            except UserIsBlockedError:
+                logging.error(f"User has blocked the bot: {event.chat_id}")
 
-    # Run the bot until disconnected
     await bot.run_until_disconnected()
-
-    # Disconnect the session client
     await client.disconnect()
 
 

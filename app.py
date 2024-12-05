@@ -1,62 +1,129 @@
+import asyncio
+import logging
 import uuid
-import qrcode
-from flask import Flask, render_template_string, request
-from config import BOT_NAME
+import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 
-app = Flask(__name__, static_url_path='/static', static_folder='static')
+import aiofiles
+import qrcode
+from hypercorn import Config
+from hypercorn.asyncio import serve
+from quart import Quart, render_template_string, request
+
+from config import BOT_NAME, NGROK_URL
+
+logging.basicConfig(level=logging.INFO)
+
+app = Quart(__name__, static_url_path='/static', static_folder='static')
+
+executor = ThreadPoolExecutor()
 
 # Store tokens and session strings
 tokens = {}
 
 bot_name = BOT_NAME
+ngrok_url = NGROK_URL
 
 
 @app.route('/')
-def index():
+async def index():
     token = str(uuid.uuid4())
 
-    print('token generated: {}'.format(token))
-
     deep_link = f"https://t.me/{bot_name}?start={token}"
-    qr_code = qrcode.make(deep_link)
-    qr_code.save(f'static/{token}.png')
-    return render_template_string('''
-        <h1>Scan this QR code with your mobile device</h1>
-        <img src="/static/{{ token }}.png">
-    ''', token=token)
+    fallback_url = f"{ngrok_url}/authorize/{token}"
+
+    # Generate separate QR codes
+    qr_code_deep_link = qrcode.make(deep_link)
+    qr_code_fallback_url = qrcode.make(fallback_url)
+
+    # Save the QR codes as images
+    qr_code_deep_link.save(f'static/{token}_telegram.png')
+    qr_code_fallback_url.save(f'static/{token}_fallback.png')
+
+    # Store the token
+    tokens[token] = None
+
+    return await render_template_string('''
+        <h1>Authenticate with your mobile device</h1>
+        <p>Scan this QR code to open the Telegram bot:</p>
+        <img src="/static/{{ token }}_telegram.png">
+        <p>Or click the button below to authorize with the desktop app:</p>
+        <a href="{{ fallback_url }}"><button>Authorize with Desktop App</button></a>
+        <p>If you prefer, you can also scan this QR code to authorize with the desktop app:</p>
+        <img src="/static/{{ token }}_fallback.png">
+    ''', token=token, fallback_url=fallback_url)
 
 
 @app.route('/authorize/<token>')
-def authorize(token):
-
-    print('token for authorization {}'.format(token))
-
+async def authorize(token):
     if token not in tokens:
         return "Invalid or expired token", 400
-    # Display a button to start the Telegram bot authorization
-    return render_template_string('''
+
+    return await render_template_string('''
         <h1>Authorize the Desktop App</h1>
         <p>Click the button below to authorize the app using Telegram.</p>
-        <a href="https://t.me/{{ bot_name }}?start={{ token }}">Authorize with Telegram</a>
+        <a href="https://t.me/{{ bot_name }}?start={{ token }}" id="telegramLink">
+            Authorize with Telegram
+        </a>
     ''', bot_name=bot_name, token=token)
 
 
 @app.route('/callback/<token>', methods=['POST'])
-def callback(token):
-
-    print('token for callback: {}'.format(token))
-
-    session_string = request.form.get('session')
+async def callback(token):
+    form = await request.form
+    session_string = form.get('session')
+    first_name = form.get('first_name')
+    last_name = form.get('last_name')
+    username = form.get('username')
+    
     if not session_string:
         return "Authorization failed", 400
-    tokens[token] = session_string
+    
+    tokens[token] = {
+        'session': session_string,
+        'first_name': first_name,
+        'last_name': last_name,
+        'username': username
+    }
 
     # Automatically save the session string to a file
-    with open('session_data.txt', 'w') as f:
-        f.write(session_string)
+    async with aiofiles.open('session_data.txt', 'w') as f:
+        await f.write(session_string)
 
-    return "Authorization successful, you can close this page"
+    # Automatically open main app page
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        executor, 
+        webbrowser.open_new, f'http://localhost:5000/main?token={token}'
+    )
+
+    return "Authorization successful"
+
+
+@app.route('/main')
+async def main():
+    token = request.args.get('token')
+    if token not in tokens or not tokens[token]:
+        return "Unauthorized", 403
+
+    user_info = tokens[token]
+    first_name = user_info['first_name']
+    last_name = user_info['last_name']
+    username = user_info['username']
+
+    # Load any additional data for the user here
+    return await render_template_string('''
+           <h1>Welcome, {{ first_name }} {{ last_name }}!</h1>
+           <p>You are now authenticated, {{ username }}</p>
+       ''', first_name=first_name, last_name=last_name, username=username)
+
+
+async def main_app():
+    config = Config()
+    config.bind = ["0.0.0.0:5000"]
+    logging.info("Starting Quart server")
+    await serve(app, config)
 
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
+    asyncio.run(main_app())
